@@ -20,13 +20,16 @@ RUN conda config --set ssl_verify no && \
 RUN pip config set global.trusted-host "pypi.org" && \
     pip config set global.trusted-host "files.pythonhosted.org" && \
     pip config set global.disable-pip-version-check true && \
-    pip config set global.timeout 120 && \
-    pip config set global.cert false
+    pip config set global.timeout 120
 
+# Create conda environment
 COPY requirements.txt /scratch/conditional-flow-matching/
-RUN conda create -n torchcfm python=3.10 -y && \
-    conda run -n torchcfm pip install --no-cache-dir -r /scratch/conditional-flow-matching/requirements.txt
+RUN conda create -n torchcfm python=3.10 -y
 
+# Install requirements inside torchcfm
+RUN conda run -n torchcfm pip install -r /scratch/conditional-flow-matching/requirements.txt
+
+# Copy project code
 COPY . /scratch/conditional-flow-matching
 
 # Install torchcfm in editable mode
