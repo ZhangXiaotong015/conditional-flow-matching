@@ -1,21 +1,35 @@
 FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04
 
-WORKDIR /scratch
+WORKDIR /scratch/conditional-flow-matching
 
 RUN apt-get update && apt-get install -y \
     wget git bzip2 && \
     rm -rf /var/lib/apt/lists/*
 
 ENV PATH=/opt/conda/bin:$PATH
-RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && \
+RUN wget --no-check-certificate https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && \
     bash /tmp/miniconda.sh -b -p /opt/conda && \
     rm /tmp/miniconda.sh && \
     conda clean -afy
 
-COPY requirements.txt .
-RUN conda create -n torchcfm python=3.10 -y && \
-    conda run -n torchcfm pip install --no-cache-dir -r requirements.txt
+RUN conda config --set ssl_verify no && \
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
 
-COPY . /scratch
+# Disable pip SSL verification
+RUN pip config set global.trusted-host "pypi.org" && \
+    pip config set global.trusted-host "files.pythonhosted.org" && \
+    pip config set global.disable-pip-version-check true && \
+    pip config set global.timeout 120 && \
+    pip config set global.cert false
+
+COPY requirements.txt /scratch/conditional-flow-matching/
+RUN conda create -n torchcfm python=3.10 -y && \
+    conda run -n torchcfm pip install --no-cache-dir -r /scratch/conditional-flow-matching/requirements.txt
+
+COPY . /scratch/conditional-flow-matching
+
+# Install torchcfm in editable mode
+RUN conda run -n torchcfm pip install -e .
 
 CMD ["bash"]
