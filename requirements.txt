@@ -17,4 +17,7 @@ pot>=0.9,<0.10
 absl-py>=1.4,<2.0
 clean-fid>=0.1.35,<0.2
 
+pydicom>=2.4,<2.5
+SimpleITK>=2.3,<2.4
+
 
