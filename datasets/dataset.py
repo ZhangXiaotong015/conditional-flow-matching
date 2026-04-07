@@ -1,79 +1,134 @@
 import torch
-import nibabel
-import monai
 import numpy as np
-from matplotlib import pyplot as plt
+import pydicom
 import random
 import SimpleITK as sitk
-import math
-import re
-import cv2
+import torchvision.transforms as T
+import torchvision.transforms.functional as F
 
-def dose_to_cond(dose_value, unit="mAs", min_val=None, max_val=None):
-    """
-    将原始剂量值转换为条件输入（纯 Python/NumPy 版本）：
-    1. 统一单位到 mAs
-    2. log 压缩
-    3. Min-Max 归一化到 [0,1]
+def save_png(tensor, path):
+    # tensor: [1, H, W] or [H, W]
+    if tensor.dim() == 3:
+        tensor = tensor.squeeze(0)
 
-    参数:
-        dose_value: float 或可转为 float
-        unit: "mAs" 或 "uAs"
-        min_val: 数据集 log 压缩后的最小值
-        max_val: 数据集 log 压缩后的最大值
+    # normalize to 0–255
+    img = tensor.clone()
+    img = (img - img.min()) / (img.max() - img.min() + 1e-8)
+    img = (img * 255).byte()
 
-    返回:
-        cond: float，归一化后的条件值
-    """
+    # convert to PIL and save
+    pil_img = F.to_pil_image(img)
+    pil_img.save(path)
 
-    # 转换到 mAs
-    if unit == "uAs":
-        dose_mAs = float(dose_value) / 1000.0
-    else:
-        dose_mAs = float(dose_value)
+def load_dicom(path):
+    img = sitk.ReadImage(path)
+    arr = sitk.GetArrayFromImage(img)[0]  # [1,H,W] → [H,W]
+    return arr
 
-    # log 压缩
-    dose_log = np.log1p(dose_mAs)
-
-    # 如果没有提供 min/max，则使用自身（单样本时返回 0）
-    if min_val is None:
-        min_val = dose_log
-    if max_val is None:
-        max_val = dose_log
-
-    # 归一化
-    cond = (dose_log - min_val) / (max_val - min_val + 1e-8)
-
-    return float(cond)
-
-class CFM_train(torch.utils.data.Dataset):
-    def __init__(self, list_IDs, name=None):
+class CFM_train_dicom(torch.utils.data.Dataset):
+    def __init__(self, list_IDs, name=None, pre_processing=True):
         self.list_IDs = list_IDs
         self.name = name
-        self.clip_min = 0
-        self.clip_max = 300
+        self.pre_processing = pre_processing
+        self.resize = T.Compose([
+            T.Resize((512, 512)),
+            # T.ToTensor(),
+        ])
+
+        self.crop_then_resize = T.Compose([
+            T.RandomCrop(1024),
+            T.Resize((512, 512)),
+            # T.ToTensor(),
+        ])
 
     def __len__(self):
-        return len(self.list_IDs['hepatic'])
+        # return len(self.list_IDs['high_dose']) *2
+        return 2
 
     def __getitem__(self, index):
-        ct = nibabel.load(self.list_IDs['ct'][index]).get_fdata().transpose(2,0,1)
-        # filtered_ct = nibabel.load(self.list_IDs['filtered_ct'][index]).get_fdata().transpose(2,0,1)
-        hepatic = nibabel.load(self.list_IDs['hepatic'][index]).get_fdata().transpose(2,0,1)
-        portal = nibabel.load(self.list_IDs['portal'][index]).get_fdata().transpose(2,0,1)
+        key = random.choice(['low_dose', 'mid_dose'])
+        abs_idx = index % len(self.list_IDs['high_dose'])
 
-        ct = np.clip(ct, self.clip_min, self.clip_max)
-        ct = (ct-self.clip_min) / (self.clip_max-self.clip_min+1e-7)
-        # ct = (ct-ct.min()) / (ct.max()-ct.min()+1e-7)
-        # filtered_ct = (filtered_ct-filtered_ct.min()) / (filtered_ct.max()-filtered_ct.min()+1e-7)
+        src_items = list(self.list_IDs[key].items())
+        dst_items = list(self.list_IDs['high_dose'].items())
 
-        label = hepatic + portal
-        label[label>0] = 1
+        src_path, src_dose = src_items[abs_idx]
+        dst_path, dst_dose = dst_items[abs_idx]
 
-        # ct_25d = torch.cat((torch.from_numpy(ct)[None].type(torch.float32), torch.from_numpy(filtered_ct)[None].type(torch.float32)), dim=1)
-        ct_25d = torch.from_numpy(ct)[None].type(torch.float32)
-        # ct = ct_25d[:,3,].unsqueeze(1)
-        label = torch.from_numpy(label)[None].type(torch.LongTensor)
-        label = label[:,3,].unsqueeze(1)
+        src_dose = np.array(round(src_dose, 2))
+        dst_dose = np.array(round(dst_dose, 2))
 
-        return tuple((ct_25d, label))
+        # src_img = pydicom.dcmread(src_path).pixel_array
+        # dst_img = pydicom.dcmread(dst_path).pixel_array
+        src_img = load_dicom(src_path)
+        dst_img = load_dicom(dst_path)
+
+        src_dose = torch.from_numpy(src_dose).to(torch.float32).unsqueeze(0)
+        dst_dose = torch.from_numpy(dst_dose).to(torch.float32).unsqueeze(0)
+        src_img = torch.from_numpy(src_img).to(torch.float32).unsqueeze(0)
+        dst_img = torch.from_numpy(dst_img).to(torch.float32).unsqueeze(0)
+
+        if self.pre_processing:
+            _, H, W = src_img.shape
+
+            if H <= 1024 and W <= 1024:
+                src_dst_img = self.resize(torch.cat((src_img, dst_img),dim=0))
+                src_img = src_dst_img[0].unsqueeze(0).unsqueeze(0)
+                dst_img = src_dst_img[1].unsqueeze(0).unsqueeze(0)
+            else:
+                src_dst_img = self.crop_then_resize(torch.cat((src_img, dst_img),dim=0))
+                src_img = src_dst_img[0].unsqueeze(0).unsqueeze(0)
+                dst_img = src_dst_img[1].unsqueeze(0).unsqueeze(0)
+
+        # save_png(src_img, "/scratch/conditional-flow-matching/src.png")
+        # save_png(dst_img, "/scratch/conditional-flow-matching/dst.png")
+
+        return tuple((src_img, dst_img, src_dose, dst_dose))
+
+class CFM_validation_dicom(torch.utils.data.Dataset):
+    def __init__(self, list_IDs, name=None, pre_processing=True):
+        self.list_IDs = list_IDs
+        self.name = name
+        self.pre_processing = pre_processing
+
+        self.crop = T.Compose([
+            T.RandomCrop(512),
+        ])
+
+    def __len__(self):
+        # return len(self.list_IDs['high_dose'])
+        return 2
+
+    def __getitem__(self, index):
+        key = random.choice(['low_dose', 'mid_dose'])
+        # abs_idx = index % len(self.list_IDs['high_dose'])
+
+        src_items = list(self.list_IDs[key].items())
+        dst_items = list(self.list_IDs['high_dose'].items())
+
+        src_path, src_dose = src_items[index]
+        dst_path, dst_dose = dst_items[index]
+
+        src_dose = np.array(round(src_dose, 2))
+        dst_dose = np.array(round(dst_dose, 2))
+
+        # src_img = pydicom.dcmread(src_path).pixel_array
+        # dst_img = pydicom.dcmread(dst_path).pixel_array
+        src_img = load_dicom(src_path)
+        dst_img = load_dicom(dst_path)
+
+        src_dose = torch.from_numpy(src_dose).to(torch.float32).unsqueeze(0)
+        dst_dose = torch.from_numpy(dst_dose).to(torch.float32).unsqueeze(0)
+        src_img = torch.from_numpy(src_img).to(torch.float32).unsqueeze(0)
+        dst_img = torch.from_numpy(dst_img).to(torch.float32).unsqueeze(0)
+
+        if self.pre_processing:
+            _, H, W = src_img.shape
+            src_dst_img = self.crop(torch.cat((src_img, dst_img),dim=0))
+            src_img = src_dst_img[0].unsqueeze(0).unsqueeze(0)
+            dst_img = src_dst_img[1].unsqueeze(0).unsqueeze(0)
+
+        # save_png(src_img, "/scratch/conditional-flow-matching/src.png")
+        # save_png(dst_img, "/scratch/conditional-flow-matching/dst.png")
+
+        return tuple((src_img, dst_img, src_dose, dst_dose))

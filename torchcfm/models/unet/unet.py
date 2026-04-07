@@ -444,6 +444,15 @@ class UNetModel(nn.Module):
             linear(time_embed_dim, time_embed_dim),
         )
 
+        # ---- NEW: cond embedding ----
+        # 假设 cond 是标量（剂量），cond_dim = 1
+        cond_dim = 1
+        self.cond_emb = nn.Sequential(
+            nn.Linear(cond_dim, time_embed_dim),
+            nn.SiLU(),
+            nn.Linear(time_embed_dim, time_embed_dim),
+        )
+
         if self.num_classes is not None:
             self.label_emb = nn.Embedding(num_classes, time_embed_dim)
 
@@ -595,7 +604,7 @@ class UNetModel(nn.Module):
         self.middle_block.apply(convert_module_to_f32)
         self.output_blocks.apply(convert_module_to_f32)
 
-    def forward(self, t, x, y=None):
+    def forward(self, t, x, cond=None, y=None):
         """Apply the model to an input batch.
 
         :param x: an [N x C x ...] Tensor of inputs.
@@ -619,6 +628,14 @@ class UNetModel(nn.Module):
         if self.num_classes is not None:
             assert y.shape == (x.shape[0],)
             emb = emb + self.label_emb(y)
+
+        # -------------------------------
+        # NEW: cond embedding
+        # -------------------------------
+        if cond is not None:
+            # cond shape: [N, cond_dim]
+            cond_emb = self.cond_emb(cond)
+            emb = emb + cond_emb
 
         h = x.type(self.dtype)
         for module in self.input_blocks:
@@ -920,5 +937,5 @@ class UNetModelWrapper(UNetModel):
             use_new_attention_order=use_new_attention_order,
         )
 
-    def forward(self, t, x, y=None, *args, **kwargs):
-        return super().forward(t, x, y=y)
+    def forward(self, t, x, cond=None, y=None, *args, **kwargs):
+        return super().forward(t, x, cond=cond, y=y)
