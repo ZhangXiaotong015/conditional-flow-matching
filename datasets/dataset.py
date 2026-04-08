@@ -42,8 +42,7 @@ class CFM_train_dicom(torch.utils.data.Dataset):
         ])
 
     def __len__(self):
-        # return len(self.list_IDs['high_dose']) *2
-        return 2
+        return len(self.list_IDs['high_dose']) * 8
 
     def __getitem__(self, index):
         key = random.choice(['low_dose', 'mid_dose'])
@@ -67,6 +66,11 @@ class CFM_train_dicom(torch.utils.data.Dataset):
         dst_dose = torch.from_numpy(dst_dose).to(torch.float32).unsqueeze(0)
         src_img = torch.from_numpy(src_img).to(torch.float32).unsqueeze(0)
         dst_img = torch.from_numpy(dst_img).to(torch.float32).unsqueeze(0)
+
+        # src_img = torch.clamp(src_img, 0, 65535) / 65535.0
+        # dst_img = torch.clamp(dst_img, 0, 65535) / 65535.0
+        src_img = (src_img - src_img.mean()) / src_img.std()
+        dst_img = (dst_img - dst_img.mean()) / dst_img.std()
 
         if self.pre_processing:
             _, H, W = src_img.shape
@@ -96,18 +100,17 @@ class CFM_validation_dicom(torch.utils.data.Dataset):
         ])
 
     def __len__(self):
-        # return len(self.list_IDs['high_dose'])
-        return 2
+        return len(self.list_IDs['high_dose']) * 4
 
     def __getitem__(self, index):
         key = random.choice(['low_dose', 'mid_dose'])
-        # abs_idx = index % len(self.list_IDs['high_dose'])
+        abs_idx = index % len(self.list_IDs['high_dose'])
 
         src_items = list(self.list_IDs[key].items())
         dst_items = list(self.list_IDs['high_dose'].items())
 
-        src_path, src_dose = src_items[index]
-        dst_path, dst_dose = dst_items[index]
+        src_path, src_dose = src_items[abs_idx]
+        dst_path, dst_dose = dst_items[abs_idx]
 
         src_dose = np.array(round(src_dose, 2))
         dst_dose = np.array(round(dst_dose, 2))
@@ -121,6 +124,11 @@ class CFM_validation_dicom(torch.utils.data.Dataset):
         dst_dose = torch.from_numpy(dst_dose).to(torch.float32).unsqueeze(0).unsqueeze(0)
         src_img = torch.from_numpy(src_img).to(torch.float32).unsqueeze(0)
         dst_img = torch.from_numpy(dst_img).to(torch.float32).unsqueeze(0)
+
+        # src_img = torch.clamp(src_img, 0, 65535) / 65535.0
+        # dst_img = torch.clamp(dst_img, 0, 65535) / 65535.0
+        src_img = (src_img - src_img.mean()) / src_img.std()
+        dst_img = (dst_img - dst_img.mean()) / dst_img.std()
 
         if self.pre_processing:
             _, H, W = src_img.shape

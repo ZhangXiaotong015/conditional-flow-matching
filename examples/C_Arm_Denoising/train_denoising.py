@@ -8,6 +8,7 @@ import os
 
 import torch
 from torchvision import datasets, transforms
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import trange
 # from utils_cifar import ema, generate_samples, infiniteloop
 
@@ -24,7 +25,7 @@ import numpy as np
 
 from datasets.dataset import CFM_train_dicom, CFM_validation_dicom
 from examples.C_Arm_Denoising.utils_carm import validate_carm
-
+from examples.C_Arm_Denoising.metrics import AverageMeter
 
 use_cuda = torch.cuda.is_available()
 device = torch.device("cuda" if use_cuda else "cpu")
@@ -90,6 +91,9 @@ def train(args):
         args.ema_decay,
         args.save_step,
     )
+
+    os.makedirs(os.path.join(args.log_dir, args.model), exist_ok=True)
+    writer = SummaryWriter(log_dir=os.path.join(args.log_dir, args.model))
 
     train_patch_path = {'low_dose':{}, 'mid_dose':{}, 'high_dose':{}}
     valid_patch_path = {'low_dose':{}, 'mid_dose':{}, 'high_dose':{}}
@@ -218,6 +222,10 @@ def train(args):
     savedir = args.output_dir + args.model + "/"
     os.makedirs(savedir, exist_ok=True)
 
+    lossesMeter = AverageMeter(name='TrainMeter total loss ')
+    psnrMeter = AverageMeter(name='ValMeter PSNR')
+    ssimMeter = AverageMeter(name='ValMeter SSIM')
+
     train_iter = iter(trainloader)
     # while (step < args.total_steps):
     with trange(args.total_steps, dynamic_ncols=True) as pbar:
@@ -245,6 +253,10 @@ def train(args):
 
             loss.backward()
 
+            lossesMeter.update(loss.item())
+            if step % 200 == 0:
+                writer.add_scalar("train/loss", scalar_value=lossesMeter.avg, global_step=step+1)
+
             torch.nn.utils.clip_grad_norm_(net_model.parameters(), args.grad_clip)  # new
 
             optim.step()
@@ -257,9 +269,10 @@ def train(args):
                 # generate_samples(net_model, args.parallel, savedir, step, net_="normal")
                 # generate_samples(ema_model, args.parallel, savedir, step, net_="ema")
                 val_length = len(validset)
-                val_iter = iter(validloader)
-                validate_carm(net_model, val_iter, savedir, step, val_length, device, net_="normal")
-                validate_carm(net_model, val_iter, savedir, step, val_length, device, net_="ema")
+
+                validate_carm(net_model, validloader, savedir, step, val_length, device, writer, psnrMeter, ssimMeter, net_="normal")
+                validate_carm(ema_model, validloader, savedir, step, val_length, device, writer, psnrMeter, ssimMeter, net_="ema")
+
                 torch.save(
                     {
                         "net_model": net_model.state_dict(),
@@ -268,9 +281,10 @@ def train(args):
                         "optim": optim.state_dict(),
                         "step": step,
                     },
-                    savedir + f"{args.model}_cifar10_weights_step_{step}.pt",
+                    savedir + f"{args.model}_carm_weights_step_{step}.pt",
                 )
 
+    writer.close()
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -291,6 +305,8 @@ def get_args():
                         help="flow matching model type")
     parser.add_argument("--output_dir", type=str, default="./results/",
                         help="output_directory")
+    parser.add_argument("--log_dir", type=str, default="./logs/",
+                        help="logs_directory")
 
     # UNet
     parser.add_argument("--num_channel", type=int, default=128,
@@ -305,7 +321,7 @@ def get_args():
                         help="total training steps")
     parser.add_argument("--warmup", type=int, default=5000,
                         help="learning rate warmup")
-    parser.add_argument("--batch_size", type=int, default=2,#128,
+    parser.add_argument("--batch_size", type=int, default=128,
                         help="batch size")
     parser.add_argument("--num_workers", type=int, default=4,
                         help="workers of Dataloader")
@@ -315,7 +331,7 @@ def get_args():
                         help="multi gpu training")
 
     # Evaluation
-    parser.add_argument("--save_step", type=int, default=1,#20000,
+    parser.add_argument("--save_step", type=int, default=20000,
                         help="frequency of saving checkpoints, 0 to disable during training")
 
     args = parser.parse_args()
@@ -327,7 +343,10 @@ if __name__ == "__main__":
     global WARMUP
     WARMUP = args.warmup
 
-    args.batch_size = 2
-    args.model = "otcfm" # icfm, fm, si
+    # args.dataset_name = 'dicom_for_comparing'
+    # args.batch_size = 8
+    # args.num_workers = 16
+    # args.model = "otcfm" # icfm, fm, si
+    # args.save_step = 10000 # 10k
 
     train(args)

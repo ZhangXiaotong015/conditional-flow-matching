@@ -5,18 +5,25 @@ from torch import nn
 from torchdyn.core import NeuralODE
 from torchdyn.numerics.odeint import odeint
 from torchvision.utils import save_image
-
+from examples.C_Arm_Denoising.metrics import AverageMeter, psnr, ssim
 
 @torch.no_grad()
-def validate_carm(model, val_iter, savedir, step, val_length, device, net_="normal"):
+def validate_carm(model, validloader, savedir, step, val_length, device, writer, psnrMeter, ssimMeter, net_="normal"):
     model.eval()
 
     # for batch in val_loader:
     step_val = 0
+    val_iter = iter(validloader)
     while (step_val < val_length):
-        batch = next(val_iter)
+        try:
+            batch = next(val_iter)
+        except StopIteration:
+            val_iter = iter(validloader)
+            batch = next(val_iter)
+
         x_noisy = batch[0].to(device)      # [B, 1, H, W]
         cond    = batch[2].to(device)    # [B, cond_dim]
+        target = batch[1].to(device)
 
         # 为当前 batch 创建一个 ODE 函数（cond 是动态的）
         class WrappedODEFunc(torch.nn.Module):
@@ -40,16 +47,30 @@ def validate_carm(model, val_iter, savedir, step, val_length, device, net_="norm
         # traj = odeint(ode_func, x_noisy, t_span, solver="rk4")0
 
         x_denoised = traj[-1]
-        raise ValueError(x_denoised.shape)
+
+        psnr_val = psnr(x_denoised, target, max_val=1.0)
+        ssim_val = ssim(x_denoised, target)
+
+        psnrMeter.update(psnr_val.item())
+        ssimMeter.update(ssim_val.item())
+        if step % 10000 == 0:
+            writer.add_scalar("validation/PSNR", scalar_value=psnrMeter.avg, global_step=step + 1)
+            writer.add_scalar("validation/SSIM", scalar_value=ssimMeter.avg, global_step=step + 1)
+
         # 反归一化（根据你的 preprocessing）
-        x_out = x_denoised.clamp(-1, 1)
-        x_out = (x_out + 1) / 2
+        # x_out = torch.clamp(x_denoised, 0, 1) * 65535.0
 
         # 保存可视化
+        B = x_denoised.shape[0]
+        # x_out_vis = torch.clamp(x_denoised, 0, 1)
+        # target_vis = torch.clamp(target, 0, 1)
+        combined = torch.cat([x_denoised, target], dim=0)
+
         save_image(
-            x_out,
-            os.path.join(savedir, f"val_step{step}_batch{i}.png"),
-            nrow=B
+            combined,
+            os.path.join(savedir, f"{net_}_val_iter_{step}_step_{step_val}.png"),
+            nrow=B,
+            normalize = False
         )
 
         step_val += 1
