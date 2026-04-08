@@ -227,10 +227,11 @@ def train(args):
     ssimMeter = AverageMeter(name='ValMeter SSIM')
 
     logging.basicConfig(
-        filename=f"./logs/train_{args.model}.log",  # 这里换成你想要的路径
+        filename=f"./logs/train_{args.model}_metrics.log",  # 这里换成你想要的路径
         filemode="a",  # 追加写入
         format="%(asctime)s - %(message)s",
-        level=logging.INFO
+        level=logging.INFO,
+        force=True
     )
 
     train_iter = iter(trainloader)
