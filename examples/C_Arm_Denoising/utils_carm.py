@@ -8,7 +8,7 @@ from torchvision.utils import save_image
 from examples.C_Arm_Denoising.metrics import AverageMeter, psnr, ssim
 
 @torch.no_grad()
-def validate_carm(model, validloader, savedir, step, val_length, device, writer, psnrMeter, ssimMeter, net_="normal"):
+def validate_carm(model, validloader, savedir, step, val_length, device, writer, logging, psnrMeter, ssimMeter, net_="normal"):
     model.eval()
 
     # for batch in val_loader:
@@ -53,7 +53,8 @@ def validate_carm(model, validloader, savedir, step, val_length, device, writer,
 
         psnrMeter.update(psnr_val.item())
         ssimMeter.update(ssim_val.item())
-        if step % 10000 == 0:
+        if step % 10000 == 0 and step_val==val_length-1:
+            logging.info(f"Step {step}, Validation PSNR: {psnrMeter.avg:.4f}, SSIM: {ssimMeter.avg:.4f}")
             writer.add_scalar("validation/PSNR", scalar_value=psnrMeter.avg, global_step=step + 1)
             writer.add_scalar("validation/SSIM", scalar_value=ssimMeter.avg, global_step=step + 1)
 

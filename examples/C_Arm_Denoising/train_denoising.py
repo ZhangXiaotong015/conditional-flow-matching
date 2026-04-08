@@ -5,7 +5,7 @@
 
 import copy
 import os
-
+import logging
 import torch
 from torchvision import datasets, transforms
 from torch.utils.tensorboard import SummaryWriter
@@ -226,6 +226,13 @@ def train(args):
     psnrMeter = AverageMeter(name='ValMeter PSNR')
     ssimMeter = AverageMeter(name='ValMeter SSIM')
 
+    logging.basicConfig(
+        filename=f"./logs/train_{args.model}.log",  # 这里换成你想要的路径
+        filemode="a",  # 追加写入
+        format="%(asctime)s - %(message)s",
+        level=logging.INFO
+    )
+
     train_iter = iter(trainloader)
     # while (step < args.total_steps):
     with trange(args.total_steps, dynamic_ncols=True) as pbar:
@@ -255,6 +262,7 @@ def train(args):
 
             lossesMeter.update(loss.item())
             if step % 200 == 0:
+                logging.info(f"Step {step}, Training Loss: {lossesMeter.avg:.4f}")
                 writer.add_scalar("train/loss", scalar_value=lossesMeter.avg, global_step=step+1)
 
             torch.nn.utils.clip_grad_norm_(net_model.parameters(), args.grad_clip)  # new
@@ -270,8 +278,8 @@ def train(args):
                 # generate_samples(ema_model, args.parallel, savedir, step, net_="ema")
                 val_length = len(validset)
 
-                validate_carm(net_model, validloader, savedir, step, val_length, device, writer, psnrMeter, ssimMeter, net_="normal")
-                validate_carm(ema_model, validloader, savedir, step, val_length, device, writer, psnrMeter, ssimMeter, net_="ema")
+                validate_carm(net_model, validloader, savedir, step, val_length, device, writer, logging, psnrMeter, ssimMeter, net_="normal")
+                validate_carm(ema_model, validloader, savedir, step, val_length, device, writer, logging, psnrMeter, ssimMeter, net_="ema")
 
                 torch.save(
                     {
