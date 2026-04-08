@@ -3,6 +3,7 @@ import copy
 import torch
 from torch import nn
 from torchdyn.core import NeuralODE
+from torchdyn.numerics.odeint import odeint
 from torchvision.utils import save_image
 
 
@@ -24,8 +25,8 @@ def validate_carm(model, val_iter, savedir, step, val_length, device, net_="norm
                 self.net = net
                 self.cond = cond
 
-            def forward(self, t, x):
-                return self.net(x, t, self.cond)
+            def forward(self, t, x, args=None):
+                return self.net(t, x, self.cond)
 
         ode_func = WrappedODEFunc(model, cond)
 
@@ -36,6 +37,8 @@ def validate_carm(model, val_iter, savedir, step, val_length, device, net_="norm
         t_span = torch.linspace(1, 0, 5, device=device)
 
         traj = node.trajectory(x_noisy, t_span)
+        # traj = odeint(ode_func, x_noisy, t_span, solver="rk4")0
+
         x_denoised = traj[-1]
         raise ValueError(x_denoised.shape)
         # 反归一化（根据你的 preprocessing）

@@ -117,8 +117,8 @@ class CFM_validation_dicom(torch.utils.data.Dataset):
         src_img = load_dicom(src_path)
         dst_img = load_dicom(dst_path)
 
-        src_dose = torch.from_numpy(src_dose).to(torch.float32).unsqueeze(0)
-        dst_dose = torch.from_numpy(dst_dose).to(torch.float32).unsqueeze(0)
+        src_dose = torch.from_numpy(src_dose).to(torch.float32).unsqueeze(0).unsqueeze(0)
+        dst_dose = torch.from_numpy(dst_dose).to(torch.float32).unsqueeze(0).unsqueeze(0)
         src_img = torch.from_numpy(src_img).to(torch.float32).unsqueeze(0)
         dst_img = torch.from_numpy(dst_img).to(torch.float32).unsqueeze(0)
 
