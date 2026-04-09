@@ -14,7 +14,7 @@ python -m examples.C_Arm_Denoising.train_denoising \
        --dataset_name 'Denoising-Low-dose-images--main/dataset' \
        --dataset_type 'paired_jpeg' \
        --model 'otcfm' \
-       --batch_size 16 \
+       --batch_size 32 \
        --num_workers 8 \
        --save_step 10000
 

@@ -197,6 +197,9 @@ class CFM_train_jpeg(torch.utils.data.Dataset):
             src_dst_img = self.crop(torch.cat((src_img, dst_img), dim=0))
             src_img = src_dst_img[0].unsqueeze(0).unsqueeze(0)
             dst_img = src_dst_img[1].unsqueeze(0).unsqueeze(0)
+        else:
+            src_img = src_img.unsqueeze(0)
+            dst_img = dst_img.unsqueeze(0)
 
         # save_png(src_img, "/scratch/conditional-flow-matching/src.png")
         # save_png(dst_img, "/scratch/conditional-flow-matching/dst.png")

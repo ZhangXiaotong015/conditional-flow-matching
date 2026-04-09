@@ -8,7 +8,7 @@ from torchvision.utils import save_image
 from examples.C_Arm_Denoising.metrics import AverageMeter, psnr, ssim, nmse
 
 @torch.no_grad()
-def validate_carm(model, validloader, savedir, step, val_length, device, writer, logging, psnrMeter, ssimMeter, nmseMeter, net_="normal"):
+def validate_carm(model, validloader, savedir, step, val_length, device, writer, logging, psnrMeter, ssimMeter, nmseMeter, net_="normal", condition=None):
     model.eval()
 
     # for batch in val_loader:
@@ -22,7 +22,10 @@ def validate_carm(model, validloader, savedir, step, val_length, device, writer,
             batch = next(val_iter)
 
         x_noisy = batch[0].to(device)      # [B, 1, H, W]
-        cond    = batch[2].to(device)    # [B, cond_dim]
+        if condition is True:
+            cond    = batch[2].to(device)    # [B, cond_dim]
+        else:
+            cond = None
         target = batch[1].to(device)
 
         # 为当前 batch 创建一个 ODE 函数（cond 是动态的）
@@ -56,7 +59,7 @@ def validate_carm(model, validloader, savedir, step, val_length, device, writer,
         ssimMeter.update(ssim_val.item())
         nmseMeter.update(nmse_val.item())
         if step % 10000 == 0 and step_val==val_length-1:
-            logging.info(f"Step {step}, Validation PSNR: {psnrMeter.avg:.4f}, SSIM: {ssimMeter.avg:.4f}")
+            logging.info(f"Step {step}, Validation PSNR: {psnrMeter.avg:.4f}, SSIM: {ssimMeter.avg:.4f}, NMSE: {nmseMeter.avg:.4f}")
             writer.add_scalar("validation/PSNR", scalar_value=psnrMeter.avg, global_step=step + 1)
             writer.add_scalar("validation/SSIM", scalar_value=ssimMeter.avg, global_step=step + 1)
             writer.add_scalar("validation/NMSE", scalar_value=nmseMeter.avg, global_step=step + 1)

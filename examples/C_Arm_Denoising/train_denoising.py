@@ -341,7 +341,7 @@ def train(args):
 
             x1 = batch[1].to(device)
             x0 = batch[0].to(device) # x0 = torch.randn_like(x1)
-            # raise ValueError(x1.shape,x0.shape)
+
             if args.condition is True:
                 cond = batch[2].to(device)
                 if cond.dim() == 1:
@@ -359,7 +359,7 @@ def train(args):
 
             lossesMeter.update(loss.item())
             if step % 200 == 0:
-                logging.info(f"Step {step}, Training Loss: {lossesMeter.avg:.4f}")
+                logging.info(f"Step {step}, Training Loss: {lossesMeter.avg:.6f}")
                 writer.add_scalar("train/loss", scalar_value=lossesMeter.avg, global_step=step+1)
 
             torch.nn.utils.clip_grad_norm_(net_model.parameters(), args.grad_clip)  # new
@@ -375,8 +375,8 @@ def train(args):
                 # generate_samples(ema_model, args.parallel, savedir, step, net_="ema")
                 val_length = len(validset)
 
-                validate_carm(net_model, validloader, savedir, step, val_length, device, writer, logging, psnrMeter, ssimMeter, nmseMeter, net_="normal")
-                validate_carm(ema_model, validloader, savedir, step, val_length, device, writer, logging, psnrMeter, ssimMeter, nmseMeter, net_="ema")
+                validate_carm(net_model, validloader, savedir, step, val_length, device, writer, logging, psnrMeter, ssimMeter, nmseMeter, net_="normal", condition=args.condition)
+                validate_carm(ema_model, validloader, savedir, step, val_length, device, writer, logging, psnrMeter, ssimMeter, nmseMeter, net_="ema", condition=args.condition)
 
                 torch.save(
                     {
