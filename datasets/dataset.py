@@ -30,16 +30,19 @@ class CFM_train_dicom(torch.utils.data.Dataset):
         self.list_IDs = list_IDs
         self.name = name
         self.pre_processing = pre_processing
-        self.resize = T.Compose([
-            T.Resize((512, 512)),
-            # T.ToTensor(),
+        self.crop = T.Compose([
+            T.RandomCrop(512),
         ])
-
-        self.crop_then_resize = T.Compose([
-            T.RandomCrop(1024),
-            T.Resize((512, 512)),
-            # T.ToTensor(),
-        ])
+        # self.resize = T.Compose([
+        #     T.Resize((512, 512)),
+        #     # T.ToTensor(),
+        # ])
+        #
+        # self.crop_then_resize = T.Compose([
+        #     T.RandomCrop(1024),
+        #     T.Resize((512, 512)),
+        #     # T.ToTensor(),
+        # ])
 
     def __len__(self):
         return len(self.list_IDs['high_dose']) * 8
@@ -73,16 +76,18 @@ class CFM_train_dicom(torch.utils.data.Dataset):
         dst_img = (dst_img - dst_img.mean()) / dst_img.std()
 
         if self.pre_processing:
-            _, H, W = src_img.shape
-
-            if H <= 1024 and W <= 1024:
-                src_dst_img = self.resize(torch.cat((src_img, dst_img),dim=0))
-                src_img = src_dst_img[0].unsqueeze(0).unsqueeze(0)
-                dst_img = src_dst_img[1].unsqueeze(0).unsqueeze(0)
-            else:
-                src_dst_img = self.crop_then_resize(torch.cat((src_img, dst_img),dim=0))
-                src_img = src_dst_img[0].unsqueeze(0).unsqueeze(0)
-                dst_img = src_dst_img[1].unsqueeze(0).unsqueeze(0)
+            src_dst_img = self.crop(torch.cat((src_img, dst_img), dim=0))
+            src_img = src_dst_img[0].unsqueeze(0).unsqueeze(0)
+            dst_img = src_dst_img[1].unsqueeze(0).unsqueeze(0)
+            # _, H, W = src_img.shape
+            # if H <= 1024 and W <= 1024:
+            #     src_dst_img = self.resize(torch.cat((src_img, dst_img),dim=0))
+            #     src_img = src_dst_img[0].unsqueeze(0).unsqueeze(0)
+            #     dst_img = src_dst_img[1].unsqueeze(0).unsqueeze(0)
+            # else:
+            #     src_dst_img = self.crop_then_resize(torch.cat((src_img, dst_img),dim=0))
+            #     src_img = src_dst_img[0].unsqueeze(0).unsqueeze(0)
+            #     dst_img = src_dst_img[1].unsqueeze(0).unsqueeze(0)
 
         # save_png(src_img, "/scratch/conditional-flow-matching/src.png")
         # save_png(dst_img, "/scratch/conditional-flow-matching/dst.png")
@@ -131,7 +136,7 @@ class CFM_validation_dicom(torch.utils.data.Dataset):
         dst_img = (dst_img - dst_img.mean()) / dst_img.std()
 
         if self.pre_processing:
-            _, H, W = src_img.shape
+            # _, H, W = src_img.shape
             src_dst_img = self.crop(torch.cat((src_img, dst_img),dim=0))
             src_img = src_dst_img[0].unsqueeze(0).unsqueeze(0)
             dst_img = src_dst_img[1].unsqueeze(0).unsqueeze(0)

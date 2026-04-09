@@ -65,7 +65,7 @@ def validate_carm(model, validloader, savedir, step, val_length, device, writer,
         B = x_denoised.shape[0]
         # x_out_vis = torch.clamp(x_denoised, 0, 1)
         # target_vis = torch.clamp(target, 0, 1)
-        combined = torch.cat([x_denoised, target], dim=0)
+        combined = torch.cat([x_noisy, x_denoised, target], dim=0)
 
         save_image(
             combined,
