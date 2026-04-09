@@ -5,10 +5,10 @@ from torch import nn
 from torchdyn.core import NeuralODE
 from torchdyn.numerics.odeint import odeint
 from torchvision.utils import save_image
-from examples.C_Arm_Denoising.metrics import AverageMeter, psnr, ssim
+from examples.C_Arm_Denoising.metrics import AverageMeter, psnr, ssim, nmse
 
 @torch.no_grad()
-def validate_carm(model, validloader, savedir, step, val_length, device, writer, logging, psnrMeter, ssimMeter, net_="normal"):
+def validate_carm(model, validloader, savedir, step, val_length, device, writer, logging, psnrMeter, ssimMeter, nmseMeter, net_="normal"):
     model.eval()
 
     # for batch in val_loader:
@@ -37,11 +37,11 @@ def validate_carm(model, validloader, savedir, step, val_length, device, writer,
 
         ode_func = WrappedODEFunc(model, cond)
 
-        # node = NeuralODE(ode_func, solver="euler")
-        node = NeuralODE(ode_func, solver="rk4")
+        # node = NeuralODE(ode_func, solver="euler", sensitivity="adjoint")
+        node = NeuralODE(ode_func, solver="rk4", sensitivity="adjoint")
 
         # t_span = torch.linspace(1, 0, 100, device=device)
-        t_span = torch.linspace(1, 0, 5, device=device)
+        t_span = torch.linspace(1, 0, 30, device=device)
 
         traj = node.trajectory(x_noisy, t_span)
         # traj = odeint(ode_func, x_noisy, t_span, solver="rk4")0
@@ -50,22 +50,25 @@ def validate_carm(model, validloader, savedir, step, val_length, device, writer,
 
         psnr_val = psnr(x_denoised, target, max_val=1.0)
         ssim_val = ssim(x_denoised, target)
+        nmse_val = nmse(x_denoised, target)
 
         psnrMeter.update(psnr_val.item())
         ssimMeter.update(ssim_val.item())
+        nmseMeter.update(nmse_val.item())
         if step % 10000 == 0 and step_val==val_length-1:
             logging.info(f"Step {step}, Validation PSNR: {psnrMeter.avg:.4f}, SSIM: {ssimMeter.avg:.4f}")
             writer.add_scalar("validation/PSNR", scalar_value=psnrMeter.avg, global_step=step + 1)
             writer.add_scalar("validation/SSIM", scalar_value=ssimMeter.avg, global_step=step + 1)
+            writer.add_scalar("validation/NMSE", scalar_value=nmseMeter.avg, global_step=step + 1)
 
         # 反归一化（根据你的 preprocessing）
         # x_out = torch.clamp(x_denoised, 0, 1) * 65535.0
 
         # 保存可视化
         B = x_denoised.shape[0]
-        # x_out_vis = torch.clamp(x_denoised, 0, 1)
+        x_out_vis = torch.clamp(x_denoised, 0, 1)
         # target_vis = torch.clamp(target, 0, 1)
-        combined = torch.cat([x_noisy, x_denoised, target], dim=0)
+        combined = torch.cat([x_noisy, x_out_vis, target], dim=0)
 
         save_image(
             combined,

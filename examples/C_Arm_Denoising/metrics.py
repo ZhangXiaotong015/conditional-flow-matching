@@ -42,3 +42,17 @@ def ssim(x: torch.Tensor, y: torch.Tensor, C1=0.01**2, C2=0.03**2):
     ssim_map = ((2 * mu_x * mu_y + C1) * (2 * sigma_xy + C2)) / \
                ((mu_x ** 2 + mu_y ** 2 + C1) * (sigma_x + sigma_y + C2))
     return ssim_map.mean()
+
+
+def nmse( pred: torch.Tensor, gt: torch.Tensor) -> torch.Tensor:
+    """
+    计算 Normalized Mean Squared Error (NMSE)
+    gt: ground truth 图像 (tensor)
+    pred: 预测图像 (tensor)
+    返回: 单个标量 tensor
+    """
+    gt = gt.float()
+    pred = pred.float()
+    numerator = torch.sum((gt - pred) ** 2)
+    denominator = torch.sum(gt ** 2)
+    return numerator / denominator

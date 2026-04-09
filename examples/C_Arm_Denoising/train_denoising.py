@@ -23,7 +23,7 @@ import argparse
 import pydicom
 import numpy as np
 
-from datasets.dataset import CFM_train_dicom, CFM_validation_dicom
+from datasets.dataset import CFM_train_dicom, CFM_validation_dicom, CFM_train_jpeg, CFM_validation_jpeg
 from examples.C_Arm_Denoising.utils_carm import validate_carm
 from examples.C_Arm_Denoising.metrics import AverageMeter
 
@@ -83,6 +83,11 @@ def collate_fn_dicom(batch):
     dst_dose = torch.cat([item[3] for item in batch],axis=0)
     return src_img, dst_img, src_dose, dst_dose
 
+def collate_fn_jpeg(batch):
+    src_img = torch.cat([item[0] for item in batch],axis=0)
+    dst_img = torch.cat([item[1] for item in batch],axis=0)
+    return src_img, dst_img
+
 def train(args):
     print(
         "lr, total_steps, ema decay, save_step:",
@@ -92,90 +97,176 @@ def train(args):
         args.save_step,
     )
 
-    os.makedirs(os.path.join(args.log_dir, args.model), exist_ok=True)
-    writer = SummaryWriter(log_dir=os.path.join(args.log_dir, args.model))
+    os.makedirs(os.path.join(args.log_dir, args.training_name), exist_ok=True)
+    writer = SummaryWriter(log_dir=os.path.join(args.log_dir, args.training_name))
 
-    train_patch_path = {'low_dose':{}, 'mid_dose':{}, 'high_dose':{}}
-    valid_patch_path = {'low_dose':{}, 'mid_dose':{}, 'high_dose':{}}
-    full_paths = []
-    for root, dirs, files in os.walk(os.path.join(args.train_root_path, args.dataset_name)):
-        for name in files:
-            if name=='readme.txt':
-                continue
-            img_path = os.path.join(root, name)
-            full_paths.append(img_path)
-        full_paths = sorted(full_paths)
+    if args.dataset_type == 'paired_dicom':
+        dim = (1, 512, 512)
+        train_patch_path = {'low_dose':{}, 'mid_dose':{}, 'high_dose':{}}
+        valid_patch_path = {'low_dose':{}, 'mid_dose':{}, 'high_dose':{}}
+        full_paths = []
+        for root, dirs, files in os.walk(os.path.join(args.train_root_path, args.dataset_name)):
+            for name in files:
+                if name=='readme.txt':
+                    continue
+                img_path = os.path.join(root, name)
+                full_paths.append(img_path)
+            full_paths = sorted(full_paths)
 
-    all, low, mid, high = {}, {}, {}, {}
-    for i in range(0, len(full_paths), 3):
-        group = full_paths[i:i + 3]
-        dose_list = []
-        for path in group:
-            ds = pydicom.dcmread(path)
-            try:
-                dose = ds.get((0x0018, 0x1153), None)  # Exposure in uAs
-                dose = dose.value / 1000
-                dose = dose_to_cond(dose)
-            except:
-                exposure_time = ds.get((0x0018, 0x1150), None)  # Exposure Time (ms)
-                time_s = exposure_time.value / 1000
-                current = ds.get((0x0018, 0x8151), None)  # X-Ray Tube Current in uA
-                current_mA = current.value / 1000
-                dose = current_mA * time_s
-                dose = dose_to_cond(dose)
+        all, low, mid, high = {}, {}, {}, {}
+        for i in range(0, len(full_paths), 3):
+            group = full_paths[i:i + 3]
+            dose_list = []
+            for path in group:
+                ds = pydicom.dcmread(path)
+                try:
+                    dose = ds.get((0x0018, 0x1153), None)  # Exposure in uAs
+                    dose = dose.value / 1000
+                    dose = dose_to_cond(dose)
+                except:
+                    exposure_time = ds.get((0x0018, 0x1150), None)  # Exposure Time (ms)
+                    time_s = exposure_time.value / 1000
+                    current = ds.get((0x0018, 0x8151), None)  # X-Ray Tube Current in uA
+                    current_mA = current.value / 1000
+                    dose = current_mA * time_s
+                    dose = dose_to_cond(dose)
 
-            dose_list.append((dose, path))
-            all.update({path:dose})
-        # 按剂量排序：低 → 中 → 高
-        dose_list.sort(key=lambda x: x[0])
-        (dose_low, path_low), (dose_mid, path_mid), (dose_high, path_high) = dose_list
-        low.update({path_low:dose_low})
-        mid.update({path_mid:dose_mid})
-        high.update({path_high:dose_high})
+                dose_list.append((dose, path))
+                all.update({path:dose})
+            # 按剂量排序：低 → 中 → 高
+            dose_list.sort(key=lambda x: x[0])
+            (dose_low, path_low), (dose_mid, path_mid), (dose_high, path_high) = dose_list
+            low.update({path_low:dose_low})
+            mid.update({path_mid:dose_mid})
+            high.update({path_high:dose_high})
 
-    keys = sorted(full_paths)
-    train_keys = keys[0:3] + keys[6:-3]
-    val_keys = [k for k in keys if k not in train_keys]
+        keys = sorted(full_paths)
+        train_keys = keys[0:3] + keys[6:-3]
+        val_keys = [k for k in keys if k not in train_keys]
 
 
-    train_patch_path['low_dose'] = {k: all[k] for k in train_keys if k in low.keys()}
-    valid_patch_path['low_dose'] = {k: all[k] for k in val_keys if k in low.keys()}
-    train_patch_path['mid_dose'] = {k: all[k] for k in train_keys if k in mid.keys()}
-    valid_patch_path['mid_dose'] = {k: all[k] for k in val_keys if k in mid.keys()}
-    train_patch_path['high_dose'] = {k: all[k] for k in train_keys if k in high.keys()}
-    valid_patch_path['high_dose'] = {k: all[k] for k in val_keys if k in high.keys()}
+        train_patch_path['low_dose'] = {k: all[k] for k in train_keys if k in low.keys()}
+        valid_patch_path['low_dose'] = {k: all[k] for k in val_keys if k in low.keys()}
+        train_patch_path['mid_dose'] = {k: all[k] for k in train_keys if k in mid.keys()}
+        valid_patch_path['mid_dose'] = {k: all[k] for k in val_keys if k in mid.keys()}
+        train_patch_path['high_dose'] = {k: all[k] for k in train_keys if k in high.keys()}
+        valid_patch_path['high_dose'] = {k: all[k] for k in val_keys if k in high.keys()}
 
-    trainset = CFM_train_dicom(train_patch_path, name=args.dataset_name)
-    validset = CFM_validation_dicom(valid_patch_path, name=args.dataset_name)
+        trainset = CFM_train_dicom(train_patch_path, name=args.dataset_name)
+        validset = CFM_validation_dicom(valid_patch_path, name=args.dataset_name)
 
-    trainloader = torch.utils.data.DataLoader(
-        trainset,
-        batch_size=args.batch_size,
-        collate_fn=collate_fn_dicom,
-        shuffle=True,
-        num_workers=args.num_workers,
-        drop_last=False,
-        pin_memory=True,
-        prefetch_factor=4,
-        persistent_workers=True
-    )
+        trainloader = torch.utils.data.DataLoader(
+            trainset,
+            batch_size=args.batch_size,
+            collate_fn=collate_fn_dicom,
+            shuffle=True,
+            num_workers=args.num_workers,
+            drop_last=False,
+            pin_memory=True,
+            prefetch_factor=4,
+            persistent_workers=True
+        )
 
-    validloader = torch.utils.data.DataLoader(
-        validset,
-        batch_size=args.batch_size,
-        collate_fn=collate_fn_dicom,
-        shuffle=False,
-        num_workers=args.num_workers,
-        drop_last=False,
-        pin_memory=True,
-        prefetch_factor=4,
-        persistent_workers=True
-    )
+        validloader = torch.utils.data.DataLoader(
+            validset,
+            batch_size=args.batch_size,
+            collate_fn=collate_fn_dicom,
+            shuffle=False,
+            num_workers=args.num_workers,
+            drop_last=False,
+            pin_memory=True,
+            prefetch_factor=4,
+            persistent_workers=True
+        )
+
+    elif args.dataset_type == 'paired_jpeg':
+        dim = (1, 256, 256)
+        train_patch_path = {'low_dose':[], 'high_dose':[]}
+        valid_patch_path = {'low_dose':{}, 'mid_dose':{}, 'high_dose':{}}
+        # Load training set paths
+        for root, dirs, files in os.walk(os.path.join(args.train_root_path, args.dataset_name)):
+            for name in files:
+                img_path = os.path.join(root, name)
+                if root.split('/')[-1] == 'high':
+                    train_patch_path['high_dose'].append(img_path)
+                elif root.split('/')[-1] == 'low':
+                    train_patch_path['low_dose'].append(img_path)
+            train_patch_path['low_dose'] = sorted(train_patch_path['low_dose'])
+            train_patch_path['high_dose'] = sorted(train_patch_path['high_dose'])
+            
+        # Load validation set paths
+        full_paths = []
+        for root, dirs, files in os.walk(os.path.join(args.train_root_path, 'dicom_for_comparing')):
+            for name in files:
+                if name=='readme.txt':
+                    continue
+                img_path = os.path.join(root, name)
+                full_paths.append(img_path)
+            full_paths = sorted(full_paths)
+
+        all, low, mid, high = {}, {}, {}, {}
+        for i in range(0, len(full_paths), 3):
+            group = full_paths[i:i + 3]
+            dose_list = []
+            for path in group:
+                ds = pydicom.dcmread(path)
+                try:
+                    dose = ds.get((0x0018, 0x1153), None)  # Exposure in uAs
+                    dose = dose.value / 1000
+                    dose = dose_to_cond(dose)
+                except:
+                    exposure_time = ds.get((0x0018, 0x1150), None)  # Exposure Time (ms)
+                    time_s = exposure_time.value / 1000
+                    current = ds.get((0x0018, 0x8151), None)  # X-Ray Tube Current in uA
+                    current_mA = current.value / 1000
+                    dose = current_mA * time_s
+                    dose = dose_to_cond(dose)
+
+                dose_list.append((dose, path))
+                all.update({path:dose})
+            # 按剂量排序：低 → 中 → 高
+            dose_list.sort(key=lambda x: x[0])
+            (dose_low, path_low), (dose_mid, path_mid), (dose_high, path_high) = dose_list
+            low.update({path_low:dose_low})
+            mid.update({path_mid:dose_mid})
+            high.update({path_high:dose_high})
+
+        val_keys = sorted(full_paths)
+        valid_patch_path['low_dose'] = {k: all[k] for k in val_keys if k in low.keys()}
+        valid_patch_path['mid_dose'] = {k: all[k] for k in val_keys if k in mid.keys()}
+        valid_patch_path['high_dose'] = {k: all[k] for k in val_keys if k in high.keys()}
+
+        trainset = CFM_train_jpeg(train_patch_path, name=args.dataset_name, pre_processing=False)
+        validset = CFM_validation_jpeg(valid_patch_path, name=args.dataset_name, pre_processing=True)
+
+        trainloader = torch.utils.data.DataLoader(
+            trainset,
+            batch_size=args.batch_size,
+            collate_fn=collate_fn_jpeg,
+            shuffle=True,
+            num_workers=args.num_workers,
+            drop_last=False,
+            pin_memory=True,
+            prefetch_factor=4,
+            persistent_workers=True
+        )
+
+        validloader = torch.utils.data.DataLoader(
+            validset,
+            batch_size=args.batch_size,
+            collate_fn=collate_fn_jpeg,
+            shuffle=False,
+            num_workers=args.num_workers,
+            drop_last=False,
+            pin_memory=True,
+            prefetch_factor=4,
+            persistent_workers=True
+        )
 
 
     # MODELS
     net_model = UNetModelWrapper(
-        dim=(1, 512, 512),
+        dim=dim,
         num_res_blocks=2,
         num_channels=args.num_channel,
         channel_mult=[1, 2, 2, 2],
@@ -219,15 +310,16 @@ def train(args):
             f"Unknown model {args.model}, must be one of ['otcfm', 'icfm', 'fm', 'si']"
         )
 
-    savedir = args.output_dir + args.model + "/"
+    savedir = args.output_dir + args.training_name + "/"
     os.makedirs(savedir, exist_ok=True)
 
     lossesMeter = AverageMeter(name='TrainMeter total loss ')
     psnrMeter = AverageMeter(name='ValMeter PSNR')
     ssimMeter = AverageMeter(name='ValMeter SSIM')
+    nmseMeter = AverageMeter(name='ValMeter NMSE')
 
     logging.basicConfig(
-        filename=f"./logs/{args.model}/train_{args.model}_metrics.log",  # 这里换成你想要的路径
+        filename=f"./logs/{args.training_name}/train_metrics.log",  # 这里换成你想要的路径
         filemode="a",  # 追加写入
         format="%(asctime)s - %(message)s",
         level=logging.INFO,
@@ -249,9 +341,13 @@ def train(args):
 
             x1 = batch[1].to(device)
             x0 = batch[0].to(device) # x0 = torch.randn_like(x1)
-            cond = batch[2].to(device)
-            if cond.dim() == 1:
-                cond = cond.unsqueeze(1)
+            # raise ValueError(x1.shape,x0.shape)
+            if args.condition is True:
+                cond = batch[2].to(device)
+                if cond.dim() == 1:
+                    cond = cond.unsqueeze(1)
+            else:
+                cond = None
 
             t, xt, ut = FM.sample_location_and_conditional_flow(x0, x1)
 
@@ -279,8 +375,8 @@ def train(args):
                 # generate_samples(ema_model, args.parallel, savedir, step, net_="ema")
                 val_length = len(validset)
 
-                validate_carm(net_model, validloader, savedir, step, val_length, device, writer, logging, psnrMeter, ssimMeter, net_="normal")
-                validate_carm(ema_model, validloader, savedir, step, val_length, device, writer, logging, psnrMeter, ssimMeter, net_="ema")
+                validate_carm(net_model, validloader, savedir, step, val_length, device, writer, logging, psnrMeter, ssimMeter, nmseMeter, net_="normal")
+                validate_carm(ema_model, validloader, savedir, step, val_length, device, writer, logging, psnrMeter, ssimMeter, nmseMeter, net_="ema")
 
                 torch.save(
                     {
@@ -298,18 +394,33 @@ def train(args):
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--training_name",
+        type=str,
+        default="otcfm_xxxx"
+    )
+
+    parser.add_argument(
         "--train_root_path",
         type=str,
         default="/data"
+        # default = r"/mnt/c/Users/250024095/Projects/3rd STO AI Hackathon/3rd AI Hackathon- Surgery Training Datasets"
     )
 
     parser.add_argument(
         "--dataset_name",
         type=str,
-        default="dicom_for_comparing"
+        default="dicom_for_comparing" # "Denoising-Low-dose-images--main/dataset"
+    )
+
+    parser.add_argument(
+        "--dataset_type",
+        type=str,
+        default="paired_dicom" # "paired_jpeg", "unpaired_jpeg"
     )
 
     # Model
+    parser.add_argument("--condition", action="store_true",
+                        help="Dose value conditioning")
     parser.add_argument("--model", type=str, default="otcfm",
                         help="flow matching model type")
     parser.add_argument("--output_dir", type=str, default="./results/",
@@ -353,6 +464,8 @@ if __name__ == "__main__":
     WARMUP = args.warmup
 
     # args.dataset_name = 'dicom_for_comparing'
+    # args.dataset_type = 'paired_dicom'
+    # args.condition = True
     # args.batch_size = 8
     # args.num_workers = 16
     # args.model = "otcfm" # icfm, fm, si
