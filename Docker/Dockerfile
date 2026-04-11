@@ -3,7 +3,7 @@ FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04
 WORKDIR /scratch/conditional-flow-matching
 
 RUN apt-get update && apt-get install -y \
-    wget git bzip2 && \
+    wget git bzip2 vim && \
     rm -rf /var/lib/apt/lists/*
 
 ENV PATH=/opt/conda/bin:$PATH
