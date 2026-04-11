@@ -5,7 +5,7 @@ from torch import nn
 from torchdyn.core import NeuralODE
 from torchdyn.numerics.odeint import odeint
 from torchvision.utils import save_image
-from examples.C_Arm_Denoising.metrics import AverageMeter, psnr, ssim, nmse
+from examples.C_Arm_Denoising.metrics import AverageMeter, psnr, ssim, nmse, minmax_normalize
 
 @torch.no_grad()
 def validate_carm(model, validloader, savedir, step, val_length, device, writer, logging, psnrMeter, ssimMeter, nmseMeter, net_="normal", condition=None):
@@ -51,6 +51,8 @@ def validate_carm(model, validloader, savedir, step, val_length, device, writer,
 
         x_denoised = traj[-1]
 
+        x_denoised = minmax_normalize(x_denoised)
+
         psnr_val = psnr(x_denoised, target, max_val=1.0)
         ssim_val = ssim(x_denoised, target)
         nmse_val = nmse(x_denoised, target)
@@ -58,7 +60,7 @@ def validate_carm(model, validloader, savedir, step, val_length, device, writer,
         psnrMeter.update(psnr_val.item())
         ssimMeter.update(ssim_val.item())
         nmseMeter.update(nmse_val.item())
-        if step % 10000 == 0 and step_val==val_length-1:
+        if step % 2000 == 0 and step_val==val_length-1:
             logging.info(f"Step {step}, Validation PSNR: {psnrMeter.avg:.4f}, SSIM: {ssimMeter.avg:.4f}, NMSE: {nmseMeter.avg:.4f}")
             writer.add_scalar("validation/PSNR", scalar_value=psnrMeter.avg, global_step=step + 1)
             writer.add_scalar("validation/SSIM", scalar_value=ssimMeter.avg, global_step=step + 1)
@@ -69,9 +71,9 @@ def validate_carm(model, validloader, savedir, step, val_length, device, writer,
 
         # 保存可视化
         B = x_denoised.shape[0]
-        x_out_vis = torch.clamp(x_denoised, 0, 1)
+        # x_out_vis = torch.clamp(x_denoised, 0, 1)
         # target_vis = torch.clamp(target, 0, 1)
-        combined = torch.cat([x_noisy, x_out_vis, target], dim=0)
+        combined = torch.cat([x_noisy, x_denoised, target], dim=0)
 
         save_image(
             combined,

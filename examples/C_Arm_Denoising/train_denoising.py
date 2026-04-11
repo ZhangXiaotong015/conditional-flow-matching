@@ -26,6 +26,8 @@ import numpy as np
 from datasets.dataset import CFM_train_dicom, CFM_validation_dicom, CFM_train_jpeg, CFM_validation_jpeg
 from examples.C_Arm_Denoising.utils_carm import validate_carm
 from examples.C_Arm_Denoising.metrics import AverageMeter
+from pytorch_msssim import ssim
+from torchdyn.core import NeuralODE
 
 use_cuda = torch.cuda.is_available()
 device = torch.device("cuda" if use_cuda else "cpu")
@@ -101,7 +103,8 @@ def train(args):
     writer = SummaryWriter(log_dir=os.path.join(args.log_dir, args.training_name))
 
     if args.dataset_type == 'paired_dicom':
-        dim = (1, 512, 512)
+        # dim = (1, 512, 512)
+        dim = (1, 256, 256)
         train_patch_path = {'low_dose':{}, 'mid_dose':{}, 'high_dose':{}}
         valid_patch_path = {'low_dose':{}, 'mid_dose':{}, 'high_dose':{}}
         full_paths = []
@@ -317,6 +320,9 @@ def train(args):
     psnrMeter = AverageMeter(name='ValMeter PSNR')
     ssimMeter = AverageMeter(name='ValMeter SSIM')
     nmseMeter = AverageMeter(name='ValMeter NMSE')
+    if args.combined_loss is True:
+        lossesMeter_v = AverageMeter(name='TrainMeter velocity loss ')
+        lossesMeter_ssim = AverageMeter(name='TrainMeter ssim loss ')
 
     logging.basicConfig(
         filename=f"./logs/{args.training_name}/train_metrics.log",  # 这里换成你想要的路径
@@ -351,16 +357,49 @@ def train(args):
 
             t, xt, ut = FM.sample_location_and_conditional_flow(x0, x1)
 
+            if args.combined_loss is True:
+                # 为当前 batch 创建一个 ODE 函数（cond 是动态的）
+                class WrappedODEFunc(torch.nn.Module):
+                    def __init__(self, net, cond):
+                        super().__init__()
+                        self.net = net
+                        self.cond = cond
+
+                    def forward(self, t, x, args=None):
+                        return self.net(t, x, self.cond)
+
+                ode_func = WrappedODEFunc(net_model, cond)
+                node = NeuralODE(ode_func, solver="rk4", sensitivity="adjoint") # "euler"
+                t_span = torch.linspace(1, 0, 5, device=device)
+                traj = node.trajectory(x0, t_span)
+                x_denoised = traj[-1]
+                x_denoised = torch.sigmoid(x_denoised)
+                ssim_loss = 1 - ssim(x_denoised, x1, data_range=1.0, size_average=True)
+
             vt = net_model(t, xt, cond=cond)
 
-            loss = torch.mean((vt - ut) ** 2)
+            if args.combined_loss is True:
+                alpha = 0.5  # 权重可调
+                loss_v = torch.mean((vt - ut) ** 2)
+                loss = loss_v + alpha * ssim_loss
+                lossesMeter.update(loss.item())
+                lossesMeter_v.update(loss_v.item())
+                lossesMeter_ssim.update(ssim_loss.item())
+            else:
+                loss = torch.mean((vt - ut) ** 2)
+                lossesMeter.update(loss.item())
 
             loss.backward()
 
-            lossesMeter.update(loss.item())
             if step % 200 == 0:
-                logging.info(f"Step {step}, Training Loss: {lossesMeter.avg:.6f}")
-                writer.add_scalar("train/loss", scalar_value=lossesMeter.avg, global_step=step+1)
+                if args.combined_loss is True:
+                    logging.info(f"Step {step}, Training Loss: {lossesMeter.avg:.6f}, Velocity Loss: {lossesMeter_v.avg:.6f}, SSIM Loss:{lossesMeter_ssim.avg:.6f}")
+                    writer.add_scalar("train/loss", scalar_value=lossesMeter.avg, global_step=step + 1)
+                    writer.add_scalar("train/loss_v", scalar_value=lossesMeter_v.avg, global_step=step + 1)
+                    writer.add_scalar("train/loss_ssim", scalar_value=lossesMeter_ssim.avg, global_step=step + 1)
+                else:
+                    logging.info(f"Step {step}, Training Loss: {lossesMeter.avg:.6f}")
+                    writer.add_scalar("train/loss", scalar_value=lossesMeter.avg, global_step=step+1)
 
             torch.nn.utils.clip_grad_norm_(net_model.parameters(), args.grad_clip)  # new
 
@@ -433,6 +472,8 @@ def get_args():
                         help="base channel of UNet")
 
     # Training
+    parser.add_argument("--combined_loss", action="store_true",
+                        help="combined loss")
     parser.add_argument("--lr", type=float, default=2e-4,
                         help="target learning rate")
     parser.add_argument("--grad_clip", type=float, default=1.0,

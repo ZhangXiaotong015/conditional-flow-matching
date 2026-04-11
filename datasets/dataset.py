@@ -49,7 +49,7 @@ class CFM_train_dicom(torch.utils.data.Dataset):
         self.name = name
         self.pre_processing = pre_processing
         self.crop = T.Compose([
-            T.RandomCrop(512),
+            T.RandomCrop(256),
         ])
         # self.resize = T.Compose([
         #     T.Resize((512, 512)),
@@ -83,6 +83,9 @@ class CFM_train_dicom(torch.utils.data.Dataset):
         src_img = load_dicom(src_path)
         dst_img = load_dicom(dst_path)
 
+        src_img = dicom_to_8bit(src_img)
+        dst_img = dicom_to_8bit(dst_img)
+
         src_dose = torch.from_numpy(src_dose).to(torch.float32).unsqueeze(0)
         dst_dose = torch.from_numpy(dst_dose).to(torch.float32).unsqueeze(0)
         src_img = torch.from_numpy(src_img).to(torch.float32).unsqueeze(0)
@@ -90,8 +93,11 @@ class CFM_train_dicom(torch.utils.data.Dataset):
 
         # src_img = torch.clamp(src_img, 0, 65535) / 65535.0
         # dst_img = torch.clamp(dst_img, 0, 65535) / 65535.0
-        src_img = (src_img - src_img.mean()) / src_img.std()
-        dst_img = (dst_img - dst_img.mean()) / dst_img.std()
+        # z-score
+        # src_img = (src_img - src_img.mean()) / src_img.std()
+        # dst_img = (dst_img - dst_img.mean()) / dst_img.std()
+        src_img = src_img / 255 + 1e-7
+        dst_img = dst_img / 255 + 1e-7
 
         if self.pre_processing:
             src_dst_img = self.crop(torch.cat((src_img, dst_img), dim=0))
@@ -119,7 +125,7 @@ class CFM_validation_dicom(torch.utils.data.Dataset):
         self.pre_processing = pre_processing
 
         self.crop = T.Compose([
-            T.RandomCrop(512),
+            T.RandomCrop(256),
         ])
 
     def __len__(self):
@@ -143,6 +149,9 @@ class CFM_validation_dicom(torch.utils.data.Dataset):
         src_img = load_dicom(src_path)
         dst_img = load_dicom(dst_path)
 
+        src_img = dicom_to_8bit(src_img)
+        dst_img = dicom_to_8bit(dst_img)
+
         src_dose = torch.from_numpy(src_dose).to(torch.float32).unsqueeze(0).unsqueeze(0)
         dst_dose = torch.from_numpy(dst_dose).to(torch.float32).unsqueeze(0).unsqueeze(0)
         src_img = torch.from_numpy(src_img).to(torch.float32).unsqueeze(0)
@@ -150,8 +159,10 @@ class CFM_validation_dicom(torch.utils.data.Dataset):
 
         # src_img = torch.clamp(src_img, 0, 65535) / 65535.0
         # dst_img = torch.clamp(dst_img, 0, 65535) / 65535.0
-        src_img = (src_img - src_img.mean()) / src_img.std()
-        dst_img = (dst_img - dst_img.mean()) / dst_img.std()
+        # src_img = (src_img - src_img.mean()) / src_img.std()
+        # dst_img = (dst_img - dst_img.mean()) / dst_img.std()
+        src_img = src_img / 255 + 1e-7
+        dst_img = dst_img / 255 + 1e-7
 
         if self.pre_processing:
             # _, H, W = src_img.shape

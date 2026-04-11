@@ -56,3 +56,15 @@ def nmse( pred: torch.Tensor, gt: torch.Tensor) -> torch.Tensor:
     numerator = torch.sum((gt - pred) ** 2)
     denominator = torch.sum(gt ** 2)
     return numerator / denominator
+
+def minmax_normalize(x):
+    # 按 batch 中每张图像单独归一化到 [0,1]
+    B = x.shape[0]
+    x_norm = []
+    for i in range(B):
+        xi = x[i]
+        min_val = xi.min()
+        max_val = xi.max()
+        xi = (xi - min_val) / (max_val - min_val + 1e-8)
+        x_norm.append(xi)
+    return torch.stack(x_norm, dim=0)
